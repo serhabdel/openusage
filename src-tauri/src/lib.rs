@@ -1,7 +1,9 @@
 #[cfg(target_os = "macos")]
 mod app_nap;
+#[cfg(target_os = "macos")]
 mod panel;
 mod plugin_engine;
+#[cfg(target_os = "macos")]
 mod tray;
 #[cfg(target_os = "macos")]
 mod webkit_config;
@@ -92,7 +94,20 @@ fn managed_shortcut_slot() -> &'static Mutex<Option<String>> {
 fn handle_global_shortcut(app: &tauri::AppHandle, event: tauri_plugin_global_shortcut::ShortcutEvent) {
     if event.state == ShortcutState::Pressed {
         log::debug!("Global shortcut triggered");
+        #[cfg(target_os = "macos")]
         panel::toggle_panel(app);
+        #[cfg(not(target_os = "macos"))]
+        {
+            use tauri::Manager;
+            if let Some(window) = app.get_webview_window("main") {
+                if window.is_visible().unwrap_or(false) {
+                    let _ = window.hide();
+                } else {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        }
     }
 }
 
@@ -152,11 +167,13 @@ pub struct ProbeBatchComplete {
     pub batch_id: String,
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 fn init_panel(app_handle: tauri::AppHandle) {
     panel::init(&app_handle).expect("Failed to initialize panel");
 }
 
+#[cfg(target_os = "macos")]
 #[tauri::command]
 fn hide_panel(app_handle: tauri::AppHandle) {
     use tauri_nspanel::ManagerExt;
@@ -299,12 +316,22 @@ async fn start_probe_batch(
 
 #[tauri::command]
 fn get_log_path(app_handle: tauri::AppHandle) -> Result<String, String> {
-    // macOS log directory: ~/Library/Logs/{bundleIdentifier}
-    let home = dirs::home_dir().ok_or("no home dir")?;
-    let bundle_id = app_handle.config().identifier.clone();
-    let log_dir = home.join("Library").join("Logs").join(&bundle_id);
-    let log_file = log_dir.join(format!("{}.log", app_handle.package_info().name));
-    Ok(log_file.to_string_lossy().to_string())
+    #[cfg(target_os = "macos")]
+    {
+        let home = dirs::home_dir().ok_or("no home dir")?;
+        let bundle_id = app_handle.config().identifier.clone();
+        let log_dir = home.join("Library").join("Logs").join(&bundle_id);
+        let log_file = log_dir.join(format!("{}.log", app_handle.package_info().name));
+        Ok(log_file.to_string_lossy().to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let log_dir = dirs::data_local_dir().ok_or("no local data dir")?;
+        let bundle_id = app_handle.config().identifier.clone();
+        let log_dir = log_dir.join(&bundle_id).join("logs");
+        let log_file = log_dir.join(format!("{}.log", app_handle.package_info().name));
+        Ok(log_file.to_string_lossy().to_string())
+    }
 }
 
 /// Update the global shortcut registration.
@@ -416,11 +443,17 @@ pub fn run() {
     let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     let _guard = runtime.enter();
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_aptabase::Builder::new("A-US-6435241436").build())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_nspanel::init())
+        .plugin(tauri_plugin_store::Builder::default().build());
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(tauri_nspanel::init());
+    }
+
+    builder
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -438,15 +471,30 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![
-            init_panel,
-            hide_panel,
-            open_devtools,
-            start_probe_batch,
-            list_plugins,
-            get_log_path,
-            update_global_shortcut
-        ])
+        .invoke_handler({
+            #[cfg(target_os = "macos")]
+            {
+                tauri::generate_handler![
+                    init_panel,
+                    hide_panel,
+                    open_devtools,
+                    start_probe_batch,
+                    list_plugins,
+                    get_log_path,
+                    update_global_shortcut
+                ]
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                tauri::generate_handler![
+                    open_devtools,
+                    start_probe_batch,
+                    list_plugins,
+                    get_log_path,
+                    update_global_shortcut
+                ]
+            }
+        })
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -475,7 +523,61 @@ pub fn run() {
                 app_version: app.package_info().version.to_string(),
             }));
 
+            #[cfg(target_os = "macos")]
             tray::create(app.handle())?;
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                use tauri::tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent};
+                use tauri::image::Image;
+                use tauri::path::BaseDirectory;
+                use tauri::menu::{Menu, MenuItem};
+
+                let tray_icon_path = app.handle()
+                    .path()
+                    .resolve("icons/tray-icon.png", BaseDirectory::Resource)?;
+                let icon = Image::from_path(tray_icon_path)?;
+
+                let show = MenuItem::with_id(app.handle(), "show", "Show", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app.handle(), "quit", "Quit", true, None::<&str>)?;
+                let menu = Menu::with_items(app.handle(), &[&show, &quit])?;
+
+                TrayIconBuilder::with_id("tray")
+                    .icon(icon)
+                    .tooltip("OpenUsage")
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app_handle, event| {
+                        match event.id.as_ref() {
+                            "show" => {
+                                if let Some(window) = app_handle.get_webview_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                            "quit" => {
+                                app_handle.exit(0);
+                            }
+                            _ => {}
+                        }
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click { button_state, .. } = event {
+                            if button_state == MouseButtonState::Up {
+                                let app_handle = tray.app_handle();
+                                if let Some(window) = app_handle.get_webview_window("main") {
+                                    if window.is_visible().unwrap_or(false) {
+                                        let _ = window.hide();
+                                    } else {
+                                        let _ = window.show();
+                                        let _ = window.set_focus();
+                                    }
+                                }
+                            }
+                        }
+                    })
+                    .build(app.handle())?;
+            }
 
             app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
 

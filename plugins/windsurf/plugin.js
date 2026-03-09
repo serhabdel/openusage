@@ -5,18 +5,24 @@
 
   // Windsurf variants — tried in order (Windsurf first, then Windsurf Next).
   // Markers use --ide_name exact matching in the Rust discover code.
-  var VARIANTS = [
-    {
-      marker: "windsurf",
-      ideName: "windsurf",
-      stateDb: "~/Library/Application Support/Windsurf/User/globalStorage/state.vscdb",
-    },
-    {
-      marker: "windsurf-next",
-      ideName: "windsurf-next",
-      stateDb: "~/Library/Application Support/Windsurf - Next/User/globalStorage/state.vscdb",
-    },
-  ]
+  function variants(platform) {
+    var prefix
+    if (platform === "windows") prefix = "~/AppData/Roaming/"
+    else if (platform === "linux") prefix = "~/.config/"
+    else prefix = "~/Library/Application Support/"
+    return [
+      {
+        marker: "windsurf",
+        ideName: "windsurf",
+        stateDb: prefix + "Windsurf/User/globalStorage/state.vscdb",
+      },
+      {
+        marker: "windsurf-next",
+        ideName: "windsurf-next",
+        stateDb: prefix + "Windsurf - Next/User/globalStorage/state.vscdb",
+      },
+    ]
+  }
 
   // --- LS discovery ---
 
@@ -243,13 +249,14 @@
   // --- Probe ---
 
   function probe(ctx) {
-    for (var i = 0; i < VARIANTS.length; i++) {
-      var result = probeVariant(ctx, VARIANTS[i])
+    var variantList = variants(ctx.app.platform)
+    for (var i = 0; i < variantList.length; i++) {
+      var result = probeVariant(ctx, variantList[i])
       if (result) return result
     }
 
-    for (var i = 0; i < VARIANTS.length; i++) {
-      var result = probeCloudVariant(ctx, VARIANTS[i])
+    for (var i = 0; i < variantList.length; i++) {
+      var result = probeCloudVariant(ctx, variantList[i])
       if (result) return result
     }
 

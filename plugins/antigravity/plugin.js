@@ -1,6 +1,10 @@
 (function () {
   var LS_SERVICE = "exa.language_server_pb.LanguageServerService"
-  var STATE_DB = "~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb"
+  function stateDbPath(platform) {
+    if (platform === "windows") return "~/AppData/Roaming/Antigravity/User/globalStorage/state.vscdb"
+    if (platform === "linux") return "~/.config/Antigravity/User/globalStorage/state.vscdb"
+    return "~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb"
+  }
   var CLOUD_CODE_URLS = [
     "https://daily-cloudcode-pa.googleapis.com",
     "https://cloudcode-pa.googleapis.com",
@@ -66,7 +70,7 @@
   function loadApiKey(ctx) {
     try {
       var rows = ctx.host.sqlite.query(
-        STATE_DB,
+        stateDbPath(ctx.app.platform),
         "SELECT value FROM ItemTable WHERE key = 'antigravityAuthStatus' LIMIT 1"
       )
       var parsed = ctx.util.tryParseJson(rows)
@@ -83,7 +87,7 @@
   function loadProtoTokens(ctx) {
     try {
       var rows = ctx.host.sqlite.query(
-        STATE_DB,
+        stateDbPath(ctx.app.platform),
         "SELECT value FROM ItemTable WHERE key = 'jetskiStateSync.agentManagerInitState' LIMIT 1"
       )
       var parsed = ctx.util.tryParseJson(rows)

@@ -1,12 +1,16 @@
 (function () {
-  var SECRETS_FILE = "~/.local/share/amp/secrets.json"
+  function secretsFilePath(platform) {
+    if (platform === "windows") return "~/AppData/Local/amp/secrets.json"
+    return "~/.local/share/amp/secrets.json"
+  }
   var SECRETS_KEY = "apiKey@https://ampcode.com/"
   var API_URL = "https://ampcode.com/api/internal"
 
   function loadApiKey(ctx) {
-    if (!ctx.host.fs.exists(SECRETS_FILE)) return null
+    var secretsFile = secretsFilePath(ctx.app.platform)
+    if (!ctx.host.fs.exists(secretsFile)) return null
     try {
-      var text = ctx.host.fs.readText(SECRETS_FILE)
+      var text = ctx.host.fs.readText(secretsFile)
       var parsed = ctx.util.tryParseJson(text)
       if (parsed && parsed[SECRETS_KEY]) {
         ctx.host.log.info("api key loaded from secrets file")
